@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+supabase
+requests
+beautifulsoup4
+lxml
+python-dateutil
+pandas
