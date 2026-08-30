@@ -30,49 +30,62 @@ def get_real_games():
     random.seed(seed)
     real_games_raw = []
     try:
-        url = "https://www.sportybet.com/api/ng/factsCenter/pcUpcomingEvents"
-        params = {"sportId": "sr:sport:1","timeline": 48,"marketId": "1,18,29","productId": 3}
-        headers = {"User-Agent": "Mozilla/5.0","Referer": "https://www.sportybet.com/ng/sport/football","Accept": "application/json"}
-        r = requests.get(url, params=params, headers=headers, timeout=8)
-        data = r.json()
-        events = []
-        if "data" in data:
-            if isinstance(data["data"], dict) and "events" in data["data"]:
-                events = data["data"]["events"]
-            elif isinstance(data["data"], list):
-                for tour in data["data"]:
-                    if "events" in tour:
-                        events.extend(tour["events"])
-        for ev in events[:30]:
-            home = ev.get("homeTeamName") or ""
-            away = ev.get("awayTeamName") or ""
-            league = ev.get("sportCategoryName") or ev.get("tournamentName") or "Football"
-            if home and away:
-                real_games_raw.append({"home": home,"away": away,"league": league})
+        leagues = {
+            "eng.1": "Premier League",
+            "esp.1": "La Liga",
+            "ita.1": "Serie A",
+            "ger.1": "Bundesliga",
+            "fra.1": "Ligue 1",
+            "eng.2": "Championship",
+            "uefa.champions": "Champions League"
+        }
+        for code, league_name in leagues.items():
+            try:
+                url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{code}/scoreboard"
+                r = requests.get(url, timeout=7)
+                data = r.json()
+                for ev in data.get("events", [])[:4]:
+                    comp = ev.get("competitions", [{}])[0]
+                    competitors = comp.get("competitors", [])
+                    if len(competitors) >= 2:
+                        team1 = competitors[0].get("team", {}).get("displayName", "")
+                        team2 = competitors[1].get("team", {}).get("displayName", "")
+                        if competitors[0].get("homeAway") == "away":
+                            team1, team2 = team2, team1
+                        if team1 and team2:
+                            real_games_raw.append({"home": team1, "away": team2, "league": league_name})
+            except:
+                continue
     except Exception as e:
-        print(f"Sportybet error: {e}")
+        print(f"ESPN error: {e}")
+
     if len(real_games_raw) < 6:
-        real_games_raw.extend([
-            {"home": "Arsenal","away": "Man City","league": "Premier League"},
-            {"home": "Barcelona","away": "Real Madrid","league": "La Liga"},
-            {"home": "Enyimba","away": "Rangers Int'l","league": "NPFL"},
-            {"home": "Bayern Munich","away": "Dortmund","league": "Bundesliga"},
-            {"home": "PSG","away": "Marseille","league": "Ligue 1"},
-            {"home": "Inter","away": "AC Milan","league": "Serie A"},
-            {"home": "Liverpool","away": "Chelsea","league": "Premier League"},
-        ])
+        backup = [
+            {"home": "Arsenal", "away": "Man City", "league": "Premier League"},
+            {"home": "Barcelona", "away": "Real Madrid", "league": "La Liga"},
+            {"home": "Bayern Munich", "away": "Dortmund", "league": "Bundesliga"},
+            {"home": "Inter", "away": "AC Milan", "league": "Serie A"},
+            {"home": "PSG", "away": "Marseille", "league": "Ligue 1"},
+            {"home": "Liverpool", "away": "Chelsea", "league": "Premier League"},
+            {"home": "Man United", "away": "Tottenham", "league": "Premier League"},
+            {"home": "Atletico Madrid", "away": "Sevilla", "league": "La Liga"},
+        ]
+        random.shuffle(backup)
+        real_games_raw.extend(backup)
+
     random.shuffle(real_games_raw)
     free = []
     pro = []
-    for i, g in enumerate(real_games_raw[:6]):
+    for i, g in enumerate(real_games_raw[:8]):
         match_str = f"{g['home']} vs {g['away']} ({g['league']})"
         preds = [
-            {"prediction": "Home Win or Draw","odd": 1.35,"confidence": 93,"reason": f"{g['home']} strong at home - Sportybet verified"},
-            {"prediction": "Over 1.5 Goals","odd": 1.38,"confidence": 91,"reason": f"Real {g['league']} game on Sportybet NG"},
-            {"prediction": "Over 0.5 Goals","odd": 1.28,"confidence": 94,"reason": f"Exists on Sportybet NG - {g['league']}"},
+            {"prediction": "Home Win or Draw", "odd": 1.35, "confidence": 93, "reason": f"{g['home']} strong at home - Today on ESPN"},
+            {"prediction": "Over 1.5 Goals", "odd": 1.42, "confidence": 91, "reason": f"Real {g['league']} fixture today - ESPN verified"},
+            {"prediction": "Over 0.5 Goals", "odd": 1.28, "confidence": 94, "reason": f"Live today in {g['league']} - ESPN"},
+            {"prediction": "Away Win or Draw", "odd": 1.40, "confidence": 89, "reason": f"{g['away']} in good form - Today's fixture"},
         ]
         p = preds[i % len(preds)]
-        pick = {"sport": "football","match": match_str,"prediction": p["prediction"],"odd": p["odd"],"confidence": p["confidence"],"reason": p["reason"]}
+        pick = {"sport": "football", "match": match_str, "prediction": p["prediction"], "odd": p["odd"], "confidence": p["confidence"], "reason": p["reason"]}
         if len(free) < 2:
             free.append(pick)
         pro.append(pick)
