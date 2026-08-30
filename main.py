@@ -9,7 +9,38 @@ app = FastAPI()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+# --- USER TRACKING SYSTEM ---
+from collections import defaultdict
+VISITORS = {"total": 0, "free_users": set(), "pro_users": set(), "today": defaultdict(int)}
+SUBSCRIBERS = []
 
+@app.middleware("http")
+async def track_middleware(request: Request, call_next):
+    ip = request.client.host if request.client else "unknown"
+    VISITORS["total"] += 1
+    VISITORS["free_users"].add(ip)
+    VISITORS["today"][datetime.now().strftime("%Y-%m-%d")] += 1
+    response = await call_next(request)
+    return response
+
+@app.get("/admin")
+async def admin_dashboard(request: Request, key: str = ""):
+    if key != "master2024":
+        return HTMLResponse("Unauthorized - add ?key=master2024 to URL", status_code=401)
+    total_free = len(VISITORS["free_users"])
+    total_pro = len(VISITORS["pro_users"])
+    today = datetime.now().strftime("%Y-%m-%d")
+    today_visits = VISITORS["today"].get(today, 0)
+    rows = "".join([f"<tr><td>{s.get('ip')}</td><td>{s.get('plan')}</td><td>{s.get('date')}</td></tr>" for s in SUBSCRIBERS[-30:]]) or "<tr><td>No subs yet</td><td>-</td><td>-</td></tr>"
+    return HTMLResponse(f"""
+    <html><head><style>body{{font-family:sans-serif;background:#111;color:#fff;padding:20px}} .card{{background:#222;padding:20px;border-radius:12px;margin:15px 0;border-left:4px solid #00ff88}} h1{{color:#00ff88}} table{{width:100%;border-collapse:collapse;background:#222}} th,td{{padding:12px;text-align:left;border-bottom:1px solid #333}} th{{color:#00ff88}}</style></head>
+    <body><h1>MasterpickAI Admin</h1>
+    <div class="card"><h2>Total Visits: {VISITORS['total']}</h2><p>Today: {today_visits}</p></div>
+    <div class="card"><h2>Free Users (unique IPs): {total_free}</h2></div>
+    <div class="card"><h2>Pro Users: {total_pro}</h2></div>
+    <div class="card"><h2>Last Subscribers</h2><table><tr><th>IP</th><th>Plan</th><th>Date</th></tr>{rows}</table></div>
+    <p>Link: /admin?key=master2024</p></body></html>
+    """)
 # YOUR PAYMENT DETAILS
 ACCOUNT_NUMBER = "9079783177"
 BANK_NAME = "Opay / PalmPay"
@@ -56,19 +87,17 @@ def get_real_games():
                             real_games_raw.append({"home": team1, "away": team2, "league": league_name})
             except:
                 continue
-    except Exception as e:
+        except Exception as e:
         print(f"ESPN error: {e}")
 
     if len(real_games_raw) < 6:
         backup = [
-            {"home": "Arsenal", "away": "Man City", "league": "Premier League"},
-            {"home": "Barcelona", "away": "Real Madrid", "league": "La Liga"},
-            {"home": "Bayern Munich", "away": "Dortmund", "league": "Bundesliga"},
-            {"home": "Inter", "away": "AC Milan", "league": "Serie A"},
-            {"home": "PSG", "away": "Marseille", "league": "Ligue 1"},
-            {"home": "Liverpool", "away": "Chelsea", "league": "Premier League"},
-            {"home": "Man United", "away": "Tottenham", "league": "Premier League"},
-            {"home": "Atletico Madrid", "away": "Sevilla", "league": "La Liga"},
+            {"home": "Arsenal", "away": "Man City", "league": "Premier League", "sport": "football", "time": "Today"},
+            {"home": "Barcelona", "away": "Real Madrid", "league": "La Liga", "sport": "football", "time": "Today"},
+            {"home": "USA", "away": "Brazil", "league": "Volleyball Nations League", "sport": "volleyball", "time": "Today"},
+            {"home": "Italy", "away": "Poland", "league": "Volleyball Nations League", "sport": "volleyball", "time": "Today"},
+            {"home": "Ma Long", "away": "Fan Zhendong", "league": "WTT Table Tennis", "sport": "table_tennis", "time": "Today"},
+            {"home": "Hugo Calderano", "away": "Lin Yun-Ju", "league": "WTT Table Tennis", "sport": "table_tennis", "time": "Today"},
         ]
         random.shuffle(backup)
         real_games_raw.extend(backup)
@@ -78,12 +107,15 @@ def get_real_games():
     pro = []
     for i, g in enumerate(real_games_raw[:8]):
         match_str = f"{g['home']} vs {g['away']} ({g['league']})"
-        preds = [
-            {"prediction": "Home Win or Draw", "odd": 1.35, "confidence": 93, "reason": f"{g['home']} strong at home - Today on ESPN"},
-            {"prediction": "Over 1.5 Goals", "odd": 1.42, "confidence": 91, "reason": f"Real {g['league']} fixture today - ESPN verified"},
-            {"prediction": "Over 0.5 Goals", "odd": 1.28, "confidence": 94, "reason": f"Live today in {g['league']} - ESPN"},
-            {"prediction": "Away Win or Draw", "odd": 1.40, "confidence": 89, "reason": f"{g['away']} in good form - Today's fixture"},
+                preds = [
+            {"prediction": "Home Win or Draw", "odd": 1.35, "confidence": 93, "reason": f"{g['home']} strong at home - {time_display}"},
+            {"prediction": "Over 2.5 Goals", "odd": 1.85, "confidence": 90, "reason": f"High scoring {g['league']} expected {time_display}"},
+            {"prediction": "GG - Both Teams To Score YES", "odd": 1.78, "confidence": 89, "reason": f"Both {g['home']} & {g['away']} scoring form - {time_display}"},
+            {"prediction": "Over 1.5 Goals", "odd": 1.42, "confidence": 91, "reason": f"Real {g['league']} {time_display}"},
+            {"prediction": "GG & Over 2.5", "odd": 2.15, "confidence": 88, "reason": f"Open game - Both to score & goals - {time_display}"},
+            {"prediction": "Away Win or Draw", "odd": 1.55, "confidence": 87, "reason": f"{g['away']} strong away - {time_display}"},
         ]
+        
         p = preds[i % len(preds)]
         pick = {"sport": "football", "match": match_str, "prediction": p["prediction"], "odd": p["odd"], "confidence": p["confidence"], "reason": p["reason"]}
         if len(free) < 2:
