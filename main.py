@@ -49,8 +49,8 @@ input{width:100%;padding:14px;border-radius:10px;border:1px solid #333;backgroun
 .badge{padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700}
 .badge-pro{background:#00ff88;color:#000}.badge-free{background:#333;color:#aaa}
 </style></head><body>
-<div class="nav"><div class="logo">⚽ MASTERPICK AI</div><div>{{nav}}</div></div>
-{{content}}
+<div class="nav"><div class="logo">⚽ MASTERPICK AI</div><div>{{nav|safe}}</div></div>
+{{content|safe}}
 </body></html>
 """
 
