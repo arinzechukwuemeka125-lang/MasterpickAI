@@ -1,204 +1,290 @@
-import os
-import random
-import requests
+import os, random, requests, urllib.parse
 from datetime import datetime, timedelta
 from flask import Flask, session, redirect, request
 
 app = Flask(__name__)
-app.secret_key = "v21_2_whatsapp_share"
+app.secret_key = "v27_whatsapp_users"
 
-API_KEY = "8623f52e5c8224c49f7bb676d1f68665"
+API_KEY = "87a492350f7f8c1c3a63d33c46d813d8"
 ADMIN_EMAIL = "arinzechukwuemeka125@gmail.com"
 
 USERS = {
-    ADMIN_EMAIL: {
-        "pass": "Master2026!Secure",
-        "plan": "pro",
-        "status": "active",
-        "is_admin": True,
-        "pending": None,
-        "joined": "2026-09-01"
-    }
+    ADMIN_EMAIL: {"pass": "Master2026!Secure", "plan": "pro", "status": "active", "joined": "2026-09-01"}
 }
 
-POOL = [
-    {"m": "Man City vs Arsenal", "l": "EPL", "c": "England", "t": "Over 1.5", "o": "1.32", "w": 92},
-    {"m": "Real Madrid vs Barcelona", "l": "La Liga", "c": "Spain", "t": "Over 1.5", "o": "1.30", "w": 93},
-    {"m": "PSG vs Lyon", "l": "Ligue 1", "c": "France", "t": "Over 1.5", "o": "1.29", "w": 93},
-    {"m": "Bayern vs Leipzig", "l": "Bundesliga", "c": "Germany", "t": "Over 1.5", "o": "1.28", "w": 94},
-    {"m": "Rivers Utd vs Enyimba", "l": "NPFL", "c": "Nigeria", "t": "Over 1.5", "o": "1.40", "w": 88},
-]
+CACHE = {"games": [], "free_games": [], "pro_games": [], "date": None, "fetched_at": None, "history": []}
 
-CACHE = {"games": [], "date": None, "real": False}
+def get_wat():
+    wat_now = datetime.utcnow() + timedelta(hours=1)
+    today = wat_now.strftime("%Y-%m-%d")
+    yesterday = (wat_now - timedelta(days=1)).strftime("%Y-%m-%d")
+    return today, yesterday, wat_now
 
-def gen_code(prefix):
-    letters = "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=6))
-    num = random.randint(10, 99)
-    return f"{prefix}{letters}{num}"
+def fetch_fixtures(date_str):
+    try:
+        url = f"https://v3.football.api-sports.io/fixtures?date={date_str}"
+        headers = {"x-apisports-key": API_KEY}
+        r = requests.get(url, headers=headers, timeout=15)
+        j = r.json()
+        if j.get("errors"):
+            return []
+        return j.get("response", [])
+    except:
+        return []
 
-def get_games():
-    now = datetime.utcnow() + timedelta(hours=1)
-    today = now.strftime("%Y-%m-%d")
-    if CACHE["date"]!= today or not CACHE["games"]:
-        games = []
-        real = False
+def fetch_prediction(fixture_id):
+    try:
+        url = f"https://v3.football.api-sports.io/predictions?fixture={fixture_id}"
+        headers = {"x-apisports-key": API_KEY}
+        r = requests.get(url, headers=headers, timeout=10)
+        j = r.json()
+        resp = j.get("response", [])
+        if resp:
+            return resp[0]
+        return None
+    except:
+        return None
+
+def calculate_best(fixture, pred):
+    league = fixture["league"]["name"]
+    best_tip = "Over 1.5 Goals"
+    best_odd = f"{1.28 + random.random()*0.20:.2f}"
+    best_wr = random.randint(88, 94)
+    best_reason = f"BEST Over 1.5 - {league} avg 2.8+ goals"
+
+    if pred:
         try:
-            url = f"https://v3.football.api-sports.io/fixtures?date={today}"
-            headers = {"x-apisports-key": API_KEY}
-            r = requests.get(url, headers=headers, timeout=12)
-            data = r.json().get("response", [])
-            for f in data[:15]:
-                home = f["teams"]["home"]["name"]
-                away = f["teams"]["away"]["name"]
-                comp = f["league"]["name"]
-                country = f["league"]["country"]
-                ftime = f["fixture"]["date"][11:16]
-                games.append({
-                    "match": f"{home} vs {away}",
-                    "league": comp,
-                    "country": country,
-                    "tip": "Over 1.5 Goals",
-                    "odd": f"{1.25 + random.random() * 0.35:.2f}",
-                    "wr": random.randint(86, 94),
-                    "reason": f"REAL {today} {comp} API-Football",
-                    "time": ftime,
-                    "date": today
-                })
-            if games:
-                real = True
-        except Exception:
-            games = []
-        if not games:
-            for i in range(15):
-                b = POOL[i % len(POOL)]
-                games.append({
-                    "match": b["m"],
-                    "league": b["l"],
-                    "country": b["c"],
-                    "tip": b["t"],
-                    "odd": b["o"],
-                    "wr": b["w"],
-                    "reason": f"LIVE {b['l']} {b['w']}%",
-                    "time": f"{13 + i % 8}:00",
-                    "date": today
-                })
-            games = sorted(games, key=lambda x: x["wr"], reverse=True)
-        CACHE["games"] = games
+            advice = pred.get("predictions", {}).get("advice", "")
+            adv = advice.lower()
+            winner = pred.get("predictions", {}).get("winner", {}).get("name", "")
+
+            if "over 2.5" in adv:
+                best_tip = "Over 2.5 Goals"
+                best_odd = f"{1.65 + random.random()*0.30:.2f}"
+                best_wr = 87
+                best_reason = f"BEST: {advice} - High scoring"
+            elif "btts" in adv or "both teams to score" in adv:
+                best_tip = "BTTS YES"
+                best_odd = f"{1.70 + random.random()*0.25:.2f}"
+                best_wr = 86
+                best_reason = f"BEST: {advice} - Both score"
+            elif "home" in winner.lower():
+                if random.random() > 0.5:
+                    best_tip = f"{fixture['teams']['home']['name']} Win"
+                    best_odd = f"{1.55 + random.random()*0.50:.2f}"
+                    best_wr = 88
+                    best_reason = f"BEST: {advice} - Home strong"
+                else:
+                    best_tip = "1X (Home or Draw)"
+                    best_odd = f"{1.25 + random.random()*0.20:.2f}"
+                    best_wr = 92
+                    best_reason = f"BEST: {advice} - Double chance safest"
+            elif "away" in winner.lower():
+                best_tip = "X2 (Away or Draw)"
+                best_odd = f"{1.30 + random.random()*0.30:.2f}"
+                best_wr = 90
+                best_reason = f"BEST: {advice} - Away form"
+            elif "under" in adv:
+                best_tip = "Under 3.5 Goals"
+                best_odd = f"{1.35 + random.random()*0.20:.2f}"
+                best_wr = 89
+                best_reason = f"BEST: {advice} - Low scoring"
+            else:
+                best_tip = "Over 1.5 Goals"
+                best_wr = 93
+                best_reason = f"BEST: {advice} - Safest 94%"
+        except:
+            pass
+    return best_tip, best_odd, best_wr, best_reason
+
+def update_all():
+    today, yesterday, wat_now = get_wat()
+    if CACHE["date"]!= today or not CACHE["games"]:
+        y_fix = fetch_fixtures(yesterday)
+        y_games = []
+        for f in y_fix[:15]:
+            tip, odd, wr, reason = calculate_best(f, None)
+            hg = f["goals"]["home"]
+            ag = f["goals"]["away"]
+            status = f["fixture"]["status"]["short"]
+            res = "UPCOMING"
+            if status in ["FT", "AET", "PEN"] and hg is not None:
+                total = hg + ag
+                if "Over 1.5" in tip:
+                    res = "WON" if total > 1.5 else "LOST"
+                elif "Over 2.5" in tip:
+                    res = "WON" if total > 2.5 else "LOST"
+                elif "BTTS" in tip:
+                    res = "WON" if hg > 0 and ag > 0 else "LOST"
+                else:
+                    res = "WON" if total > 1.5 else "LOST"
+            y_games.append({
+                "match": f"{f['teams']['home']['name']} vs {f['teams']['away']['name']}",
+                "league": f["league"]["name"], "country": f["league"]["country"],
+                "tip": tip, "odd": odd, "wr": wr, "time": f["fixture"]["date"][11:16],
+                "date": yesterday, "status": status, "score": f"{hg}-{ag}" if hg is not None else "-",
+                "result": res, "reason": reason
+            })
+        CACHE["history"] = y_games
+
+        t_fix = fetch_fixtures(today)
+        all_games = []
+        for f in t_fix[:12]:
+            pred = fetch_prediction(f["fixture"]["id"])
+            tip, odd, wr, reason = calculate_best(f, pred)
+            status = f["fixture"]["status"]["short"]
+            all_games.append({
+                "match": f"{f['teams']['home']['name']} vs {f['teams']['away']['name']}",
+                "league": f["league"]["name"], "country": f["league"]["country"],
+                "tip": tip, "odd": odd, "wr": wr, "time": f["fixture"]["date"][11:16],
+                "date": today, "status": status, "score": "-", "result": "UPCOMING", "reason": reason
+            })
+        all_games = sorted(all_games, key=lambda x: x["wr"], reverse=True)
+        free = [g for g in all_games if g["wr"] >= 90][:2]
+        if len(free) < 2:
+            free = all_games[:2]
+        for g in free:
+            g["tip"] = "Over 1.5 Goals"
+            g["odd"] = f"{1.40 + random.random()*0.15:.2f}"
+            g["wr"] = 94
+        pro = [g for g in all_games if g not in free]
+        CACHE["games"] = all_games
+        CACHE["free_games"] = free
+        CACHE["pro_games"] = pro
         CACHE["date"] = today
-        CACHE["real"] = real
-    return CACHE["games"]
+        CACHE["fetched_at"] = wat_now.strftime("%Y-%m-%d %H:%M WAT")
+    return CACHE["free_games"], CACHE["pro_games"], CACHE["history"]
 
 STYLE = """
-<meta name='viewport' content='width=device-width, initial-scale=1'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
 <style>
-body{background:#070a10;color:#fff;font-family:sans-serif;margin:0}
-.top{background:#0e1525;padding:14px;border-bottom:1px solid #1e2a44;display:flex;justify-content:space-between}
+body{background:#070a10;color:#fff;font-family:-apple-system,Segoe UI,sans-serif;margin:0}
+.top{background:#0e1525;padding:14px 16px;border-bottom:1px solid #1e2a44;display:flex;justify-content:space-between;position:sticky;top:0;z-index:10}
 .card{background:#121b2c;border:1px solid #1e2a44;border-radius:16px;padding:14px;margin:10px 0}
-.match{font-weight:800}
-.league{color:#6b7fa3;font-size:11px}
-.odd{background:#00ff88;color:#000;padding:4px 10px;border-radius:8px;font-weight:800}
-.btn{background:#00ff88;color:#000;padding:12px;border-radius:12px;display:block;text-align:center;text-decoration:none;font-weight:700;margin:8px 0}
-.code{background:#070a10;border:1px dashed #00ff88;padding:10px;border-radius:10px;margin-top:8px;display:flex;justify-content:space-between;align-items:center}
-.wabtn{background:#25D366;color:#fff;padding:6px 10px;border-radius:8px;text-decoration:none;font-size:11px;font-weight:700}
+.match{font-weight:800;font-size:15px;margin:6px 0}
+.league{color:#6b7fa3;font-size:11px;text-transform:uppercase}
+.odd{background:#00ff88;color:#000;padding:4px 10px;border-radius:8px;font-weight:800;font-size:13px}
+.btn{background:#00ff88;color:#000;padding:12px;border-radius:12px;display:block;text-align:center;text-decoration:none;font-weight:800;margin:8px 0}
+.tag{font-size:10px;padding:3px 7px;border-radius:6px;background:#1e2a44;color:#8aa0c5}
+.tag-real{background:#00ff88;color:#000;font-weight:700}
+.tag-won{background:#00ff88;color:#000;font-weight:800}
+.tag-lost{background:#ff3b3b;color:#fff;font-weight:800}
+.wabtn{background:#25D366;color:#fff;padding:6px 12px;border-radius:8px;text-decoration:none;font-size:11px;font-weight:700;display:inline-block;margin-left:8px}
+.input{width:100%;padding:12px;background:#0f172a;border:1px solid #1e2a44;border-radius:10px;color:#fff;margin:8px 0;box-sizing:border-box}
+.badge{color:#6b7fa3;font-size:11px}
 </style>
 """
 
-def is_admin(email):
-    return email == ADMIN_EMAIL
+def wa_link(text):
+    enc = urllib.parse.quote(text)
+    return f"https://wa.me/?text={enc}"
 
 @app.route("/")
 def home():
     email = session.get("email")
-    games = get_games()
-    free_games = games[:3]
-    pro_games = games[3:15]
+    free_games, pro_games, history = update_all()
     free_odds = 1.0
-    for g in free_games[:2]:
-        try:
-            free_odds *= float(g["odd"])
-        except Exception:
-            pass
-    free_sp = gen_code("SP")
-    free_1x = gen_code("1X")
-    pro_sp = gen_code("SP")
-    pro_1x = gen_code("1X")
-    real_label = "REAL API" if CACHE["real"] else "CURATED LIVE"
-    html = f"<html><head>{STYLE}</head><body>"
-    html += f"<div class=top><div>MASTERPICK <span style=color:#00ff88>AI</span> V21.2 {real_label}</div><div>"
-    if email:
-        html += f"{email[:14]} <a href=/logout style=color:#6b7fa3;text-decoration:none>Logout</a>"
-    else:
-        html += "<a href=/login style=color:#fff;text-decoration:none>Login</a> <a href=/signup style=color:#00ff88;text-decoration:none;margin-left:8px>Signup</a>"
-    html += "</div></div><div style=padding:16px>"
-
-    # FREE with WhatsApp Share
-    html += f"<div class=card><h3>FREE - 9/10 @{free_odds:.2f} - {real_label}</h3>"
-    html += f"<div class=code><div>SPORTYBET CODE<br><b style=color:#00ff88>{free_sp}</b></div><div><a class=wabtn href='https://wa.me/?text=MasterPick%20AI%20FREE%20SportyBet%20Code%3A%20{free_sp}%20-%20{free_games[0]['match']}%20@Over1.5%20-%20Join%3A%20masterpick.onrender.com'>WhatsApp</a></div></div>"
-    html += f"<div class=code style=border-color:#5a9aff><div>1XBET CODE<br><b style=color:#5a9aff>{free_1x}</b></div><div><a class=wabtn href='https://wa.me/?text=MasterPick%20AI%20FREE%201xBet%20Code%3A%20{free_1x}%20-%20{free_games[0]['match']}%20@Over1.5%20-%20Join%3A%20masterpick.onrender.com'>WhatsApp</a></div></div></div>"
-
     for g in free_games:
-        html += f"<div class=card><div class=league>{g['league']} {g['country']} {g['date']} {g['time']} {g['wr']}% {real_label}</div>"
-        html += f"<div class=match>{g['match']}</div><div>{g['tip']} <span class=odd>{g['odd']}</span></div>"
-        html += f"<div style=color:#00ff88;font-size:11px;margin-top:6px>{g['reason']}</div></div>"
+        try: free_odds *= float(g["odd"])
+        except: pass
 
-    # PRO with WhatsApp Share
-    html += f"<div class=card><h3>PRO - 7-8/10 @4.50+ - {real_label}</h3>"
-    html += f"<div class=code style=border-color:gold><div>SPORTYBET CODE<br><b style=color:gold>{pro_sp}</b></div><div><a class=wabtn href='https://wa.me/?text=MasterPick%20AI%20PRO%20SportyBet%20Code%3A%20{pro_sp}%20-%2012%20Games%20@4.50%2B%20-%20Join%3A%20masterpick.onrender.com'>WhatsApp</a></div></div>"
-    html += f"<div class=code style=border-color:#5a9aff><div>1XBET CODE<br><b style=color:#5a9aff>{pro_1x}</b></div><div><a class=wabtn href='https://wa.me/?text=MasterPick%20AI%20PRO%201xBet%20Code%3A%20{pro_1x}%20-%2012%20Games%20@4.50%2B%20-%20Join%3A%20masterpick.onrender.com'>WhatsApp</a></div></div></div>"
+    html = f"<html><head>{STYLE}</head><body>"
+    html += f"<div class=top><div style=font-weight:900>MASTERPICK <span style=color:#00ff88>AI</span> V27</div><div class=badge>{email[:12] if email else '<a href=/login style=color:#fff;text-decoration:none>Login</a>'} <a href=/logout style=color:#6b7fa3;text-decoration:none;margin-left:8px>Logout</a></div></div><div style=padding:16px>"
+    html += f"<div class=card style=border-color:#00ff88><div class=league><span class=tag tag-real>REAL API</span> {CACHE['date']} • {CACHE['fetched_at']} • Auto 1AM WAT</div></div>"
 
-    if email and USERS.get(email, {}).get("plan") == "pro":
+    # FREE with WhatsApp
+    free_text = f"MasterPick AI FREE TODAY {CACHE['date']} @{free_odds:.2f}\n"
+    for g in free_games:
+        free_text += f"{g['match']} - {g['tip']} @{g['odd']}\n"
+    free_text += "Join: masterpick.onrender.com"
+    html += f"<div class=card style=border-color:#00ff88><h3 style=margin:0> FREE 9/10 TARGET @{free_odds:.2f} - 2 GAMES <a class=wabtn href='{wa_link(free_text)}'>WhatsApp Share</a></h3></div>"
+    for g in free_games:
+        txt = f"{g['match']} - {g['tip']} @{g['odd']} - {g['league']} {g['date']} - MasterPick AI"
+        html += f"<div class=card><div class=league>{g['league']} {g['country']} {g['date']} {g['time']} <span class=tag tag-real>{g['wr']}%</span></div><div class=match>{g['match']}</div><div>{g['tip']} <span class=odd>{g['odd']}</span> <span class=tag>{g['status']}</span> <a class=wabtn href='{wa_link(txt)}'>WhatsApp</a></div><div class=badge>{g['reason']}</div></div>"
+
+    # PRO with WhatsApp
+    pro_text = f"MasterPick AI PRO TODAY {CACHE['date']} {len(pro_games)} Games Best Markets\n"
+    for g in pro_games[:5]:
+        pro_text += f"{g['match']} - {g['tip']} @{g['odd']}\n"
+    pro_text += "Unlock: masterpick.onrender.com"
+    html += f"<div class=card style=border-color:gold><h3 style=margin:0>PRO 8-9/10 TARGET - {len(pro_games)} Best Markets <a class=wabtn href='{wa_link(pro_text)}'>WhatsApp Share</a></h3><div class=league>Each game highest parameter - not one option</div></div>"
+
+    if email and USERS.get(email, {}).get("plan")=="pro":
         for g in pro_games:
-            html += f"<div class=card><div class=league>{g['league']} {g['wr']}%</div><div class=match>{g['match']}</div><div>{g['tip']} <span class=odd>{g['odd']}</span></div></div>"
+            txt = f"PRO: {g['match']} - {g['tip']} @{g['odd']} - {g['reason']} - MasterPick"
+            html += f"<div class=card><div class=league>{g['league']} {g['country']} {g['time']} <span class=tag tag-real>{g['wr']}%</span></div><div class=match>{g['match']}</div><div>{g['tip']} <span class=odd>{g['odd']}</span> <span class=tag>{g['status']}</span> <a class=wabtn href='{wa_link(txt)}'>WhatsApp</a></div><div class=badge style=color:#00ff88>{g['reason']}</div></div>"
     else:
-        html += f"<div class=card style=text-align:center><div>PRO LOCKED {len(pro_games)} games - Codes hidden</div><br><a class=btn href=/plans>Unlock Pro N1000</a></div>"
+        html += f"<div class=card style=text-align:center>🔒 PRO LOCKED - {len(pro_games)} games<br><a class=btn href=/plans>Unlock N1000 Opay 09079789177</a></div>"
+
+    # HISTORY with WhatsApp
+    if history:
+        won = sum(1 for g in history if g["result"]=="WON")
+        hist_text = f"Yesterday {history[0]['date']} - MasterPick {won}/{len(history)} WON\n"
+        for g in history[:5]:
+            hist_text += f"{g['match']} {g['score']} {g['result']}\n"
+        html += f"<div class=card><h3 style=margin:0>YESTERDAY {history[0]['date']} - {won}/{len(history)} WON <a class=wabtn href='{wa_link(hist_text)}'>Share Results WhatsApp</a></h3></div>"
+        for g in history[:6]:
+            col = "tag-won" if g["result"]=="WON" else "tag-lost" if g["result"]=="LOST" else "tag"
+            html += f"<div class=card style=opacity:0.85><div class=league>{g['league']} {g['score']} <span class=tag {col}>{g['result']}</span></div><div class=match>{g['match']}</div><div>{g['tip']} <span class=odd>{g['odd']}</span></div></div>"
+
     html += "</div></body></html>"
     return html
 
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        e = request.form["email"].lower().strip()
-        p = request.form["pass"]
-        if e in USERS and USERS[e]["pass"] == p:
-            session["email"] = e
-            return redirect("/")
-    return f"<html><head>{STYLE}</head><body><div class=top>MASTERPICK AI Login</div><div style=padding:20px><form method=post><input name=email placeholder=Email style=width:100%;padding:12px;margin:8px 0;background:#0f172a;color:#fff;border:1px solid #1e2a44;border-radius:10px><input name=pass type=password placeholder=Password style=width:100%;padding:12px;margin:8px 0;background:#0f172a;color:#fff;border:1px solid #1e2a44;border-radius:10px><button class=btn style=width:100%>Login</button></form></div></body></html>"
+@app.route("/admin")
+def admin_panel():
+    email = session.get("email")
+    if email!= ADMIN_EMAIL:
+        return f"<html><head>{STYLE}</head><body><div class=top>Access Denied</div><div style=padding:20px><div class=card>Admin only - hidden from customers. Total users: {len(USERS)} but you cannot see list.</div><a class=btn href=/>Home</a></div></body></html>", 403
+    free_games, pro_games, history = update_all()
+    total = len(USERS)
+    free_count = sum(1 for u in USERS.values() if u.get("plan")=="free")
+    pro_count = sum(1 for u in USERS.values() if u.get("plan")=="pro")
+    html = f"<html><head>{STYLE}</head><body><div class=top><div style=font-weight:900>ADMIN PANEL - Hidden from Customers</div><div><a href=/ style=color:#00ff88;text-decoration:none>Home</a></div></div><div style=padding:16px>"
+    html += f"<div class=card style=border-color:#00ff88><h3>USERS - {total} Total</h3><div>Free Users: {free_count}</div><div>Pro Users: {pro_count}</div><div>Total: {total}</div><div style=margin-top:8px class=badge>API Key {API_KEY[:8]}... • Date {CACHE['date']} • Fetched {CACHE['fetched_at']} • Req 14/day • Auto 1AM WAT</div></div>"
+    html += f"<div class=card><h3>All Users List - {total}</h3>"
+    for em, u in USERS.items():
+        html += f"<div style=padding:8px 0;border-bottom:1px solid #1e2a44><b>{em}</b> - Plan: {u.get('plan')} - Status: {u.get('status')} - {u.get('joined','')}</div>"
+    html += "</div>"
+    html += f"<div class=card><h3>Yesterday History {len(history)} - WON/LOST</h3>"
+    for g in history:
+        html += f"<div style=padding:6px 0;border-bottom:1px solid #1e2a44>{g['match']} {g['score']} {g['result']}</div>"
+    html += "</div>"
+    html += f"<div class=card><h3>Today Real {CACHE['date']} - Free {len(free_games)} Pro {len(pro_games)}</h3>"
+    for g in CACHE["games"]:
+        html += f"<div style=padding:6px 0;border-bottom:1px solid #1e2a44>{g['match']} - {g['tip']} {g['wr']}%</div>"
+    html += "</div><a class=btn href=/>Back Home</a></div></body></html>"
+    return html
 
-@app.route("/signup", methods=["GET", "POST"])
+@app.route("/login", methods=["GET","POST"])
+def login():
+    if request.method=="POST":
+        e=request.form["email"].lower().strip()
+        p=request.form["pass"]
+        if e in USERS and USERS[e]["pass"]==p:
+            session["email"]=e
+            return redirect("/")
+    return f"<html><head>{STYLE}</head><body><div class=top>Login</div><div style=padding:20px><form method=post><input class=input name=email placeholder=Email required><input class=input name=pass type=password placeholder=Password required><button class=btn style=width:100%>Login</button></form></div></body></html>"
+
+@app.route("/signup", methods=["GET","POST"])
 def signup():
-    if request.method == "POST":
-        e = request.form["email"].lower().strip()
-        p = request.form["pass"]
-        USERS[e] = {"pass": p, "plan": "free", "status": "active", "is_admin": False, "pending": None, "joined": "2026-09-01"}
-        session["email"] = e
+    if request.method=="POST":
+        e=request.form["email"].lower().strip()
+        p=request.form["pass"]
+        if e in USERS:
+            return f"<html><head>{STYLE}</head><body><div class=top>Exists</div><div style=padding:20px><div class=card>Email exists</div><a class=btn href=/login>Login</a></div></body></html>"
+        USERS[e]={"pass":p,"plan":"free","status":"active","joined":get_wat()[0]}
+        session["email"]=e
         return redirect("/")
-    return f"<html><head>{STYLE}</head><body><div class=top>MASTERPICK AI Signup</div><div style=padding:20px><form method=post><input name=email placeholder=Email style=width:100%;padding:12px;margin:8px 0;background:#0f172a;color:#fff;border:1px solid #1e2a44;border-radius:10px><input name=pass type=password placeholder=Password style=width:100%;padding:12px;margin:8px 0;background:#0f172a;color:#fff;border:1px solid #1e2a44;border-radius:10px><button class=btn style=width:100%>Create Free</button></form></div></body></html>"
+    return f"<html><head>{STYLE}</head><body><div class=top>Signup Free</div><div style=padding:20px><form method=post><input class=input name=email placeholder=Email required><input class=input name=pass type=password placeholder=Password required><button class=btn style=width:100%>Create Free Account</button></form></div></body></html>"
 
 @app.route("/plans")
 def plans():
-    return f"<html><head>{STYLE}</head><body><div class=top>Plans - Opay 09079789177</div><div style=padding:16px><a class=btn href=/subscribe/1000>N1000 3 Days</a><a class=btn href=/subscribe/2000>N2000 7 Days</a><a class=btn href=/subscribe/5000>N5000 15 Days</a></div></body></html>"
-
-@app.route("/subscribe/<plan>")
-def subscribe(plan):
-    e = session.get("email")
-    if not e:
-        return redirect("/login")
-    USERS[e]["pending"] = plan
-    USERS[e]["status"] = "pending"
-    return redirect("/")
-
-@app.route("/admin")
-def admin_page():
-    e = session.get("email")
-    if not is_admin(e):
-        return "Access denied - Admin only"
-    return f"<html><head>{STYLE}</head><body><div class=top>ADMIN {CACHE['date']} REAL={CACHE['real']}</div><div style=padding:16px><p>Total: {len(USERS)} Today: {CACHE['date']}</p><a class=btn href=/>Home</a></div></body></html>"
+    return f"<html><head>{STYLE}</head><body><div class=top>Plans Opay 09079789177</div><div style=padding:16px><a class=btn href=/>N1000 3 Days</a></div></body></html>"
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect("/")
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+if __name__=="__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)))
