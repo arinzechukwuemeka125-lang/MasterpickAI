@@ -3,9 +3,9 @@ from datetime import datetime, timedelta
 from flask import Flask, session, redirect, request
 
 app = Flask(__name__)
-app.secret_key = "v35_demo_locked_env_2026_final"
+app.secret_key = "v35_real_env_locked_2026_final"
 
-API_KEY = os.environ.get("API_KEY", "demo")
+API_KEY = os.environ.get("API_KEY", "")
 ADMIN_EMAIL = "arinzechukwuemeka125@gmail.com"
 OPAY_ACCOUNT = "09079789177"
 OPAY_NAME = "Arinze Chukwuemeka P"
@@ -20,25 +20,6 @@ def get_wat():
     return today, yesterday, wat_now
 
 def fetch_real(d):
-    # DEMO MODE - for testing lock interface
-    if API_KEY == "demo" or API_KEY.lower() == "demo":
-        CACHE["raw_count"] = 12
-        CACHE["api_error"] = ""
-        demo = [
-            {"fixture":{"date":f"{d}T19:00:00+00:00","status":{"short":"NS"}},"league":{"name":"Premier League","country":"England"},"teams":{"home":{"name":"Man City"},"away":{"name":"Arsenal"}},"goals":{"home":None,"away":None}},
-            {"fixture":{"date":f"{d}T18:30:00+00:00","status":{"short":"NS"}},"league":{"name":"La Liga","country":"Spain"},"teams":{"home":{"name":"Barcelona"},"away":{"name":"Real Madrid"}},"goals":{"home":None,"away":None}},
-            {"fixture":{"date":f"{d}T20:00:00+00:00","status":{"short":"NS"}},"league":{"name":"Serie A","country":"Italy"},"teams":{"home":{"name":"Inter"},"away":{"name":"AC Milan"}},"goals":{"home":None,"away":None}},
-            {"fixture":{"date":f"{d}T19:45:00+00:00","status":{"short":"NS"}},"league":{"name":"Bundesliga","country":"Germany"},"teams":{"home":{"name":"Bayern Munich"},"away":{"name":"Dortmund"}},"goals":{"home":None,"away":None}},
-            {"fixture":{"date":f"{d}T17:00:00+00:00","status":{"short":"NS"}},"league":{"name":"Ligue 1","country":"France"},"teams":{"home":{"name":"PSG"},"away":{"name":"Marseille"}},"goals":{"home":None,"away":None}},
-            {"fixture":{"date":f"{d}T19:00:00+00:00","status":{"short":"NS"}},"league":{"name":"Eredivisie","country":"Netherlands"},"teams":{"home":{"name":"Ajax"},"away":{"name":"PSV"}},"goals":{"home":None,"away":None}},
-            {"fixture":{"date":f"{d}T18:00:00+00:00","status":{"short":"NS"}},"league":{"name":"Primeira Liga","country":"Portugal"},"teams":{"home":{"name":"Benfica"},"away":{"name":"Porto"}},"goals":{"home":None,"away":None}},
-            {"fixture":{"date":f"{d}T19:30:00+00:00","status":{"short":"NS"}},"league":{"name":"Belgian Pro League","country":"Belgium"},"teams":{"home":{"name":"Club Brugge"},"away":{"name":"Anderlecht"}},"goals":{"home":None,"away":None}},
-            {"fixture":{"date":f"{d}T20:30:00+00:00","status":{"short":"NS"}},"league":{"name":"Championship","country":"England"},"teams":{"home":{"name":"Leeds"},"away":{"name":"Leicester"}},"goals":{"home":None,"away":None}},
-            {"fixture":{"date":f"{d}T16:00:00+00:00","status":{"short":"NS"}},"league":{"name":"Brasileiro","country":"Brazil"},"teams":{"home":{"name":"Flamengo"},"away":{"name":"Palmeiras"}},"goals":{"home":None,"away":None}},
-            {"fixture":{"date":f"{d}T21:00:00+00:00","status":{"short":"NS"}},"league":{"name":"Super Lig","country":"Turkey"},"teams":{"home":{"name":"Galatasaray"},"away":{"name":"Fenerbahce"}},"goals":{"home":None,"away":None}},
-            {"fixture":{"date":f"{d}T17:30:00+00:00","status":{"short":"NS"}},"league":{"name":"Eredivisie","country":"Netherlands"},"teams":{"home":{"name":"Feyenoord"},"away":{"name":"AZ Alkmaar"}},"goals":{"home":None,"away":None}},
-        ]
-        return demo
     try:
         headers = {"x-apisports-key": API_KEY}
         r = requests.get(f"https://v3.football.api-sports.io/fixtures?date={d}", headers=headers, timeout=15)
@@ -47,11 +28,10 @@ def fetch_real(d):
         if j.get("errors") and j["errors"]:
             CACHE["api_error"] = str(j["errors"])
             return []
-        if j.get("response") is not None:
-            if isinstance(j["response"], list):
-                if d == get_wat()[0]:
-                    CACHE["raw_count"] = len(j["response"])
-                return j["response"]
+        if j.get("response") is not None and isinstance(j["response"], list):
+            if d == get_wat()[0]:
+                CACHE["raw_count"] = len(j["response"])
+            return j["response"]
         return []
     except Exception as e:
         CACHE["api_error"] = str(e)
@@ -64,7 +44,6 @@ def calc_18_local(fix):
     country = fix["league"]["country"]
     is_high = any(x in (league+country).lower() for x in ["brazil","ecuador","argentina","norway","netherlands","mexico","belgium"])
     total_avg = 2.9 if is_high else 2.5
-    over15 = 92 if total_avg >= 2.8 else 85
     h_form = random.choice(["WWWDW","WDWDW","LWWWD"])
     a_form = random.choice(["WDWDW","LWWWD","WWLWD"])
     h_w = h_form.count("W")
@@ -72,12 +51,11 @@ def calc_18_local(fix):
     tip = "Over 1.5 Goals"
     odd = f"{1.42+random.random()*0.12:.2f}"
     wr = 94
-    reason = f"18P Avg{total_avg:.1f} Over15 {over15}% Form {h_form} vs {a_form} Mot {motivation}%"
     if h_w >= 2 and random.random() > 0.6:
         tip = f"{hname} Win"
         odd = f"{1.65+random.random()*0.25:.2f}"
         wr = 88
-    return tip, odd, wr, reason
+    return tip, odd, wr, f"18P Avg{total_avg:.1f} Form {h_form} vs {a_form} Mot {motivation}%"
 
 def update_all():
     today, yesterday, wat_now = get_wat()
@@ -150,9 +128,9 @@ def home():
         html+=f"<a href=/login style=color:#fff;text-decoration:none;font-weight:700;font-size:13px>Login</a><a href=/signup style=background:#fff;color:#000;padding:10px 18px;border-radius:12px;text-decoration:none;font-weight:800;font-size:13px>Sign Up</a>"
     html+="</div></div><div style=max-width:720px;margin:0 auto;padding:20px>"
     if CACHE["api_error"] and "suspended" in CACHE["api_error"].lower():
-        html+=f"<div class=card style=border-color:#ff3a4c><div class=league style=color:#ff3a4c>API KEY SUSPENDED</div><div class=badge>{CACHE['api_error'][:120]}</div></div>"
+        html+=f"<div class=card style=border-color:#ff3a4c><div class=league style=color:#ff3a4c>API KEY SUSPENDED - Create new key</div><div class=badge>{CACHE['api_error'][:120]}</div></div>"
     if not email:
-        html+=f"<div class=card glow style=padding:28px><div class=league style=color:#00ff88>REAL API {CACHE['date']} {CACHE['fetched_at']} {CACHE['raw_count']} GAMES {CACHE['api_calls']}/100 REQ DEMO={API_KEY}</div><div class=hero-title>{len(CACHE['games']) or 12} Real Games<br>With <span style=color:#00ff88>18 Parameters</span></div><div class=badge>Login to unlock today's predictions • Auto 1AM WAT</div><a class=btn href=/login style=margin-top:20px>🔒 Login to See Games</a><a class=btn style=background:rgba(255,255,255,0.06);color:#fff;box-shadow:none;border:1px solid rgba(255,255,255,0.1);margin-top:12px href=/signup>Create Account Free</a></div>"
+        html+=f"<div class=card glow style=padding:28px><div class=league style=color:#00ff88>REAL API {CACHE['date']} {CACHE['fetched_at']} {CACHE['raw_count']} GAMES {CACHE['api_calls']}/100 REQ</div><div class=hero-title>{len(CACHE['games']) or 12} Real Games<br>With <span style=color:#00ff88>18 Parameters</span></div><div class=badge>Login to unlock today's predictions • Auto 1AM WAT</div><a class=btn href=/login style=margin-top:20px>🔒 Login to See Games</a><a class=btn style=background:rgba(255,255,255,0.06);color:#fff;box-shadow:none;border:1px solid rgba(255,255,255,0.1);margin-top:12px href=/signup>Create Account Free</a></div>"
         html+=f"<div class=card><div class=league>TEASER - LOGIN TO UNLOCK</div><div class=blur><div class=match>Man City vs Arsenal</div><div class=match>Liverpool vs Chelsea</div><div class=match>Barcelona vs Real Madrid</div></div><div style=text-align:center;margin-top:12px><a class=btn href=/login>Login to Unlock</a></div></div>"
         html+="</div></body></html>"
         return html
@@ -163,7 +141,7 @@ def home():
         except:
             pass
     if not CACHE["games"]:
-        html+=f"<div class=card style=text-align:center;padding:40px><div style=font-size:22px;font-weight:800>No Real Games Yet Today</div><div class=badge>API count {CACHE['raw_count']} Calls {CACHE['api_calls']}/100 Error {CACHE['api_error'][:80]}</div></div>"
+        html+=f"<div class=card style=text-align:center;padding:40px><div style=font-size:22px;font-weight:800>No Real Games Yet Today - Check at 1AM WAT</div><div class=badge>API count {CACHE['raw_count']} Calls {CACHE['api_calls']}/100 Error {CACHE['api_error'][:80]}</div></div>"
     else:
         free_text=f"MasterPick FREE {CACHE['date']} @{free_odds:.2f}"
         wa_free=wa_link(free_text)
@@ -191,15 +169,70 @@ def pay():
     email=session.get("email")
     proof_msg = f"Hi Admin I paid PRO {email} to {OPAY_ACCOUNT}"
     wa_proof=wa_link(proof_msg)
-    html=f"<html><head>{STYLE}</head><body><div class=top><div class=logo>MASTERPICK <span>AI</span></div><a href=/ style=color:#fff;text-decoration:none>Home</a></div><div style=max-width:520px;margin:0 auto;padding:24px><div class=card glow style=text-align:center;padding:28px><div style=font-size:26px;font-weight:800>Unlock Pro</div></div><div class=card style=text-align:center><div class=league>OPAY</div><div style=font-size:36px;font-weight:800>{OPAY_ACCOUNT}</div><div class=badge>{OPAY_NAME} {email}</div></div><div class=card><a class=btn href='{wa_proof}'>WhatsApp Proof</a><a class=btn style=background:rgba(255,255,255,0.06);color:#fff;box-shadow:none;border:1px solid rgba(255,255,255,0.1);margin-top:12px href=/ >I Paid</a></div></div></body></html>"
-    return html
+    return f"<html><head>{STYLE}</head><body><div class=top><div class=logo>MASTERPICK <span>AI</span></div><a href=/ style=color:#fff;text-decoration:none>Home</a></div><div style=max-width:520px;margin:0 auto;padding:24px><div class=card glow style=text-align:center;padding:28px><div style=font-size:26px;font-weight:800>Unlock Pro</div></div><div class=card style=text-align:center><div class=league>OPAY</div><div style=font-size:36px;font-weight:800>{OPAY_ACCOUNT}</div><div class=badge>{OPAY_NAME} {email}</div></div><div class=card><a class=btn href='{wa_proof}'>WhatsApp Proof</a><a class=btn style=background:rgba(255,255,255,0.06);color:#fff;box-shadow:none;border:1px solid rgba(255,255,255,0.1);margin-top:12px href=/ >I Paid</a></div></div></body></html>"
 
 @app.route("/admin")
 def admin_panel():
     email=session.get("email")
     if email!=ADMIN_EMAIL:
-        return f"<html><head>{STYLE}</head><body><div class=top>Denied</div><div style=padding:20px><div class=card>Total {len(USERS)}</div></div></body></html>",403
+        return "Denied",403
     free_games,pro_games,history=update_all()
     total=len(USERS); pro_c=sum(1 for u in USERS.values() if u.get("plan")=="pro")
-    html=f"<html><head>{STYLE}</head><body><div class=top><div class=logo>ADMIN V35 DEMO LOCKED</div><a href=/ style=color:#fff;text-decoration:none>Home</a></div><div style=max-width:800px;margin:0 auto;padding:20px><div class=card glow><div style=font-size:20px;font-weight:800>{total} Users {pro_c} Pro API {CACHE['api_calls']}/100 Raw {CACHE['raw_count']}</div><div class=badge>{CACHE['date']} {CACHE['fetched_at']} Key {API_KEY[:4]}... Error {CACHE['api_error'][:60]}</div></div><div class=card><div style=font-weight:800>Approve Pro</div>"
-    for em,u in USERS.items
+    html=f"<html><head>{STYLE}</head><body><div class=top><div class=logo>ADMIN V35 REAL</div><a href=/ style=color:#fff;text-decoration:none>Home</a></div><div style=max-width:800px;margin:0 auto;padding:20px><div class=card glow><div style=font-size:20px;font-weight:800>{total} Users {pro_c} Pro API {CACHE['api_calls']}/100 Raw {CACHE['raw_count']}</div><div class=badge>{CACHE['date']} {CACHE['fetched_at']} Error {CACHE['api_error'][:60]}</div></div><div class=card><div style=font-weight:800>Approve Pro</div>"
+    for em,u in USERS.items():
+        is_pro=u.get("plan")=="pro"
+        html+=f"<div style=display:flex;justify-content:space-between;padding:14px 0;border-bottom:1px solid rgba(255,255,255,0.06)><div><b>{em}</b><br><span class=badge>{u.get('plan')} {u.get('joined')}</span></div><div>"
+        if not is_pro:
+            html+=f"<a href='/admin/approve?email={em}' style=background:#00ff88;color:#000;padding:10px 16px;border-radius:12px;text-decoration:none;font-weight:800;font-size:12px>Approve</a>"
+        else:
+            html+=f"<span class=tag tag-live>PRO</span>"
+        if em!=ADMIN_EMAIL:
+            html+=f"<a href='/admin/demote?email={em}' style=background:rgba(255,255,255,0.06);color:#ff5a65;padding:8px 12px;border-radius:10px;text-decoration:none;font-size:11px;margin-left:8px>Demote</a>"
+        html+="</div></div>"
+    html+="</div></div></body></html>"
+    return html
+
+@app.route("/admin/approve")
+def approve():
+    if session.get("email")!=ADMIN_EMAIL:
+        return redirect("/")
+    t=request.args.get("email","").lower().strip()
+    if t in USERS:
+        USERS[t]["plan"]="pro"
+    return redirect("/admin")
+
+@app.route("/admin/demote")
+def demote():
+    if session.get("email")!=ADMIN_EMAIL:
+        return redirect("/")
+    t=request.args.get("email","").lower().strip()
+    if t in USERS and t!=ADMIN_EMAIL:
+        USERS[t]["plan"]="free"
+    return redirect("/admin")
+
+@app.route("/login", methods=["GET","POST"])
+def login():
+    if request.method=="POST":
+        e=request.form["email"].lower().strip(); p=request.form["pass"]
+        if e in USERS and USERS[e]["pass"]==p:
+            session["email"]=e
+            return redirect("/")
+    return f"<html><head>{STYLE}</head><body><div class=top><div class=logo>MASTERPICK <span>AI</span></div><a href=/ style=color:#fff;text-decoration:none>Home</a></div><div style=max-width:420px;margin:60px auto;padding:20px><div class=card glow><div style=font-size:22px;font-weight:800>Welcome Back</div><form method=post><input class=input name=email placeholder=Email required><input class=input name=pass type=password placeholder=Password required><button class=btn style=width:100%>Login</button></form></div></div></body></html>"
+
+@app.route("/signup", methods=["GET","POST"])
+def signup():
+    if request.method=="POST":
+        e=request.form["email"].lower().strip(); p=request.form["pass"]
+        if e not in USERS:
+            USERS[e]={"pass":p,"plan":"free","status":"pending","joined":get_wat()[0]}
+            session["email"]=e
+            return redirect("/pay")
+    return f"<html><head>{STYLE}</head><body><div class=top><div class=logo>MASTERPICK <span>AI</span></div><a href=/ style=color:#fff;text-decoration:none>Home</a></div><div style=max-width:420px;margin:60px auto;padding:20px><div class=card glow><div style=font-size:22px;font-weight:800>Create Account</div><form method=post><input class=input name=email placeholder=Email><input class=input name=pass type=password placeholder=Password><button class=btn style=width:100%>Create Account</button></form></div></div></body></html>"
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/")
+
+if __name__=="__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)))
