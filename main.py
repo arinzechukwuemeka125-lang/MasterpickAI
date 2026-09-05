@@ -1,378 +1,159 @@
-import os
-import random
-import requests
-import urllib.parse
-from datetime import datetime, timedelta
-from flask import Flask, session, redirect, request
+import os, time, requests
+from datetime import datetime
+from flask import Flask, request, redirect, session, render_template_string, jsonify
+import pytz
 
 app = Flask(__name__)
-app.secret_key = "v40_1_zero_error_pro_landing"
-API_KEY = os.environ.get("API_KEY", "").strip()
-ADMIN_EMAIL = "arinzechukwuemeka125@gmail.com"
-OPAY_ACCOUNT = "09079789177"
+app.secret_key = os.environ.get("SECRET_KEY", "masterpick44-any-league")
 
-USERS = {
-    ADMIN_EMAIL: {"pass": "Master2026!Secure", "plan": "pro", "joined": "2026-09-01"}
-}
-
-CACHE = {
-    "games": [],
-    "free": [],
-    "pro": [],
-    "date": None,
-    "display": None,
-    "calls": 0,
-    "raw": 0,
-    "live": 0,
-    "history": [],
-    "fetched": "",
-    "error": ""
-}
+TOKEN = (os.environ.get("SOCCER_API_KEY") or os.environ.get("API_KEY") or "eX1YOAIGVy").strip()
+CACHE = {"games":[], "raw":0, "calls":0, "error":"", "last":0, "date":""}
+USERS = {}
+USERS["admin@masterpickai.com"] = {"password":"Admin123!", "is_pro":True, "approved":True, "is_admin":True}
 
 def get_wat():
-    now = datetime.utcnow() + timedelta(hours=1)
-    today = now.strftime("%Y-%m-%d")
-    dates = []
-    for i in range(-1, 6):
-        d = (now + timedelta(days=i)).strftime("%Y-%m-%d")
-        dates.append(d)
-    return today, dates, now
+    return datetime.now(pytz.timezone("Africa/Lagos"))
 
-def fetch_any(date_str, live=False):
+def fetch_any_league():
+    now_ts = time.time()
+    today = get_wat().strftime("%Y-%m-%d")
+    if CACHE["games"] and CACHE["date"]==today and (now_ts-CACHE["last"])<900:
+        return CACHE["games"]
     try:
-        headers = {"x-apisports-key": API_KEY}
-        if live:
-            url = "https://v3.football.api-sports.io/fixtures?live=all"
-        else:
-            url = "https://v3.football.api-sports.io/fixtures?date=" + date_str
-        r = requests.get(url, headers=headers, timeout=20)
+        url = f"https://api.soccersapi.com/v2.2/fixtures/?t={TOKEN}&d={today}"
+        r = requests.get(url, timeout=25)
         j = r.json()
-        CACHE["calls"] = CACHE["calls"] + 1
-        if j.get("errors") and len(j["errors"]) > 0:
-            CACHE["error"] = str(j["errors"])
-            return []
-        resp = j.get("response", [])
-        if not live and date_str == get_wat()[0]:
-            CACHE["raw"] = len(resp)
-        if live:
-            CACHE["live"] = len(resp)
-        return resp
+        CACHE["calls"] += 1
+        data = j.get("data") or []
+        games = []
+        for f in data:
+            status = str(f.get("status") or "").upper()
+            if status not in ["NS","TBD","","NOT STARTED"]:
+                continue # only yet to be played
+            games.append({
+                "home": f.get("home_name") or "Home",
+                "away": f.get("away_name") or "Away",
+                "league": f.get("league_name") or f.get("competition_name") or "League",
+                "country": f.get("country_name") or "",
+                "time": (f.get("date_time") or f"{today}T15:00:00Z")[11:16],
+                "status": "NS"
+            })
+        # Sort by time, any league - no premier filter
+        games = sorted(games, key=lambda x: x["time"])[:30]
+        CACHE["games"]=games; CACHE["raw"]=len(games); CACHE["last"]=now_ts; CACHE["date"]=today
+        CACHE["error"]=f"Live Any League - {len(games)} games" if games else "API 0 - No NS today"
+        return games
     except Exception as e:
-        CACHE["error"] = str(e)
-        return []
+        CACHE["error"]=str(e)[:120]
+        CACHE["games"]=[]; CACHE["raw"]=0; return []
 
-def calc_tip(fixture):
-    home = fixture["teams"]["home"]["name"]
-    rnd = random.random()
-    if rnd > 0.5:
-        odd_val = 1.42 + random.random() * 0.15
-        return "Over 1.5 Goals", "{:.2f}".format(odd_val), 94
-    else:
-        odd_val = 1.70 + random.random() * 0.35
-        return home + " Win", "{:.2f}".format(odd_val), 88
-
-def update_cache():
-    today, all_dates, now = get_wat()
-    if CACHE["date"] == today and len(CACHE["games"]) > 0:
-        return CACHE["free"], CACHE["pro"], CACHE["history"]
-    CACHE["calls"] = 0
-    CACHE["raw"] = 0
-    CACHE["live"] = 0
-    CACHE["error"] = ""
-
-    live_fix = fetch_any("", live=True)
-    source = []
-    label = ""
-
-    if len(live_fix) >= 1:
-        source = live_fix
-        label = str(len(live_fix)) + " LIVE NOW"
-    else:
-        combined = []
-        for d in all_dates:
-            fix = fetch_any(d, live=False)
-            if len(fix) > 0:
-                combined.extend(fix)
-            if len(fix) >= 3 and len(source) == 0:
-                source = fix
-                label = d
-        if len(source) == 0:
-            source = combined[:15]
-            label = today + " All Leagues"
-
-    if len(source) == 0:
-        # Never show 0 - emergency fallback with real structure
-        source = []
-        for i in range(6):
-            fake = {
-                "teams": {"home": {"name": "Team A" + str(i)}, "away": {"name": "Team B" + str(i)}},
-                "league": {"name": "Friendly", "country": "World"},
-                "fixture": {"id": 9000 + i, "date": today + "T19:00:00+00:00", "status": {"short": "NS"}},
-                "goals": {"home": None, "away": None}
-            }
-            source.append(fake)
-        label = today + " Real Games - Check API_KEY"
-        CACHE["error"] = "Raw 0 - Replace API_KEY in Render"
-
-    games = []
-    for f in source[:15]:
-        try:
-            tip, odd, wr = calc_tip(f)
-            hg = f["goals"]["home"]
-            ag = f["goals"]["away"]
-            st = f["fixture"]["status"]["short"]
-            ft = ""
-            score = ""
-            status = st
-            if st in ["FT", "AET", "PEN"] and hg is not None:
-                ft = "FT"
-                score = str(hg) + "-" + str(ag)
-                status = "FT " + score
-            elif st in ["1H", "2H", "HT", "ET"]:
-                score = str(hg) + "-" + str(ag) if hg is not None else "0-0"
-                status = "LIVE " + score
-                ft = "LIVE"
-            h = int(f["fixture"]["date"][11:13])
-            m = f["fixture"]["date"][14:16]
-            h = (h + 1) % 24
-            wat = "{:02d}".format(h) + ":" + m + " WAT"
-        except Exception:
-            wat = "19:00 WAT"
-            status = "NS"
-            score = ""
-            ft = ""
-        games.append({
-            "match": f["teams"]["home"]["name"] + " vs " + f["teams"]["away"]["name"],
-            "league": f["league"]["name"],
-            "country": f["league"]["country"],
-            "tip": tip,
-            "odd": odd,
-            "wr": wr,
-            "time": wat,
-            "ft": ft,
-            "score": score,
-            "status": status,
-            "id": f["fixture"]["id"]
-        })
-
-    games = sorted(games, key=lambda x: (0 if "LIVE" in x["status"] else 1, -x["wr"]))
-    free = games[:2]
-    for g in free:
-        g["tip"] = "Over 1.5 Goals"
-        g["odd"] = "{:.2f}".format(1.42 + random.random() * 0.10)
-        g["wr"] = 94
-
-    pro = []
-    for g in games:
-        if g not in free:
-            pro.append(g)
-
-    CACHE["games"] = games
-    CACHE["free"] = free
-    CACHE["pro"] = pro
-    CACHE["date"] = today
-    CACHE["display"] = label
-    CACHE["fetched"] = now.strftime("%H:%M WAT")
-
-    hist = []
-    y_fix = fetch_any(all_dates[0], live=False)
-    for f in y_fix[:5]:
-        hg = f["goals"]["home"]
-        ag = f["goals"]["away"]
-        st = f["fixture"]["status"]["short"]
-        ft = ""
-        score = "-"
-        res = "PENDING"
-        if st in ["FT", "AET", "PEN"] and hg is not None:
-            ft = "FT"
-            score = str(hg) + "-" + str(ag)
-            if (hg + ag) > 1.5:
-                res = "WON"
-            else:
-                res = "LOST"
-        hist.append({
-            "match": f["teams"]["home"]["name"] + " vs " + f["teams"]["away"]["name"],
-            "league": f["league"]["name"],
-            "score": score,
-            "ft": ft,
-            "result": res,
-            "time": f["fixture"]["date"][11:16] + " WAT"
-        })
-    CACHE["history"] = hist
-    return free, pro, hist
-
-STYLE_HTML = """
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@700;800;900&display=swap" rel="stylesheet">
-<style>
-*{box-sizing:border-box}
-body{margin:0;background:#070A14;color:#fff;font-family:Inter,sans-serif}
-.top{padding:16px 20px;display:flex;justify-content:space-between;align-items:center;background:rgba(7,10,20,0.9);position:sticky;top:0;z-index:20;border-bottom:1px solid rgba(255,255,255,0.06)}
-.card{background:linear-gradient(180deg,#131A30,#0E1428);border:1px solid rgba(255,255,255,0.08);border-radius:28px;padding:24px;margin:16px 0}
-.glow{border-color:rgba(0,255,136,0.2)}
-.match{font-weight:800;margin:10px 0;font-size:16px}
-.league{color:#7A8AB0;font-size:10px;letter-spacing:1px;font-weight:800;text-transform:uppercase}
-.odd{background:#00FF88;color:#000;padding:7px 14px;border-radius:11px;font-weight:900}
-.btn{width:100%;background:#00FF88;color:#000;padding:16px;border-radius:16px;display:block;text-align:center;text-decoration:none;font-weight:900;font-size:15px;margin-top:14px}
-.btn-dark{background:rgba(255,255,255,0.06);color:#fff;border:1px solid rgba(255,255,255,0.1)}
-.tag{font-size:10px;padding:6px 11px;border-radius:20px;background:rgba(255,255,255,0.06);color:#8AA0C8;font-weight:700}
-.tag-live{background:#00FF88;color:#000}
-.tag-ft{background:#FF3A4A;color:#fff}
-.badge{display:inline-flex;background:rgba(0,255,136,0.12);border:1px solid rgba(0,255,136,0.25);color:#00FF88;padding:8px 14px;border-radius:100px;font-size:11px;font-weight:900}
-.stat{flex:1;text-align:center;padding:16px;background:rgba(255,255,255,0.03);border-radius:18px;border:1px solid rgba(255,255,255,0.06)}
-</style>
+LANDING = """
+<body style="margin:0;background:#060b1a;color:#fff;font-family:sans-serif"><div style="max-width:420px;margin:0 auto;padding:24px">
+<h1>⚽ Masterpick AI</h1><p style="color:#8aa0c8">Real fixtures - Any league - Today {{date}}</p>
+<div style="background:#111b36;border-radius:16px;padding:20px"><p>RAW {{cache.raw}} | {{cache.error}}</p>
+<p>🔒 Sign up to view real games today (any league)</p>
+<a href="/signup" style="display:block;background:#22c55e;color:#000;text-align:center;padding:14px;border-radius:12px;font-weight:bold;text-decoration:none">Create Account</a>
+<a href="/login" style="display:block;background:#1f2d5a;color:#fff;text-align:center;padding:14px;border-radius:12px;font-weight:bold;text-decoration:none;margin-top:10px">Login</a>
+</div></div></body>
 """
 
-def wa_link(text):
-    return "https://wa.me/?text=" + urllib.parse.quote(text)
+LOGIN_HTML = """<body style="margin:0;background:#060b1a;color:#fff;font-family:sans-serif"><div style="max-width:380px;margin:60px auto;padding:24px;background:#111b36;border-radius:16px">
+<h2>Login</h2><form method="post"><input name="email" placeholder="Email" required style="width:100%;padding:12px;border-radius:8px;border:1px solid #2a3a6a;background:#0b1020;color:#fff;margin:8px 0"><input name="password" type="password" placeholder="Password" required style="width:100%;padding:12px;border-radius:8px;border:1px solid #2a3a6a;background:#0b1020;color:#fff;margin:8px 0"><button style="width:100%;padding:12px;background:#22c55e;border:none;border-radius:8px;font-weight:bold;margin-top:12px">Login</button></form><p style="color:#ff6b6b">{{msg}}</p><a href="/signup" style="color:#8aa0c8">Sign up</a></div></body>"""
+
+SIGNUP_HTML = """<body style="margin:0;background:#060b1a;color:#fff;font-family:sans-serif"><div style="max-width:380px;margin:60px auto;padding:24px;background:#111b36;border-radius:16px">
+<h2>Create Account</h2><form method="post"><input name="email" placeholder="Email" required style="width:100%;padding:12px;border-radius:8px;border:1px solid #2a3a6a;background:#0b1020;color:#fff;margin:8px 0"><input name="password" type="password" placeholder="Password" required style="width:100%;padding:12px;border-radius:8px;border:1px solid #2a3a6a;background:#0b1020;color:#fff;margin:8px 0"><label style="font-size:13px"><input type="checkbox" name="want_pro"> Request Pro (admin approval)</label><button style="width:100%;padding:12px;background:#22c55e;border:none;border-radius:8px;font-weight:bold;margin-top:12px">Sign Up</button></form><p style="color:#8aa0c8">{{msg}}</p><a href="/login" style="color:#8aa0c8">Login</a></div></body>"""
+
+GAMES_HTML = """
+<body style="margin:0;background:#060b1a;color:#fff;font-family:sans-serif"><div style="max-width:520px;margin:0 auto;padding:16px">
+<div style="display:flex;justify-content:space-between"><div style="font-size:11px;color:#8aa0c8">Hi {{email}} | {{cache.error}}</div><a href="/logout" style="color:#8aa0c8;font-size:12px">Logout</a></div>
+<h2>{{date}} - Any League - {{games|length}} Games</h2>
+{% if not games %}<div style="background:#1a233f;padding:20px;border-radius:12px;text-align:center;color:#8aa0c8">No yet-to-be-played fixtures today from API.<br>API key {{tok[:4]}}... returned 0. Check SoccersAPI quota.</div>{% endif %}
+{% for g in games %}
+<div style="background:#141d38;border:1px solid #1f2d5a;border-radius:14px;padding:14px;margin:10px 0">
+<div style="font-size:11px;color:#8aa0c8">{{g.league}} {{g.country}} | {{g.time}} WAT | {{g.status}}</div>
+<div style="font-size:18px;font-weight:bold;margin:8px 0">{{g.home}} vs {{g.away}}</div>
+<div style="display:flex;gap:8px"><span style="background:#22c55e;color:#000;padding:4px 10px;border-radius:8px;font-weight:bold;font-size:12px">Over 1.5 @ 1.42</span><a href="/pro" style="background:#f59e0b;color:#000;padding:4px 10px;border-radius:8px;font-weight:bold;font-size:12px;text-decoration:none">Pro 🔒</a></div>
+</div>
+{% endfor %}
+{% if is_admin %}<a href="/admin" style="color:#8aa0c8">Admin Panel</a>{% endif %}
+</div></body>
+"""
+
+PRO_HTML = """<body style="margin:0;background:#060b1a;color:#fff;font-family:sans-serif"><div style="max-width:500px;margin:20px auto;padding:16px">
+<h2>Pro Section</h2>{% if not user.approved %}<div style="background:#3a1f1f;padding:20px;border-radius:12px">⛔ Pending admin approval - {{email}}<br><a href="/games" style="color:#8aa0c8">Back</a></div>{% else %}<div style="background:#1e3a2f;border:1px solid #22c55e;padding:16px;border-radius:12px">{% for g in games %}<div style="margin:8px 0">{{g.home}} vs {{g.away}} → <b>BTTS Yes @ 1.85</b> - {{g.league}}</div>{% endfor %}</div>{% endif %}</div></body>"""
+
+ADMIN_HTML = """<body style="margin:0;background:#060b1a;color:#fff;font-family:sans-serif;padding:16px"><h2>Admin - Approve Pro</h2><div style="font-size:12px;color:#8aa0c8">{{cache.error}} | Calls {{cache.calls}}</div>{% for email,u in users.items() %}<div style="background:#141d38;padding:12px;margin:8px 0;border-radius:10px;display:flex;justify-content:space-between"><div>{{email}} Pro:{{u.is_pro}} Approved:{{u.approved}}</div><div><a href="/admin/approve?email={{email}}" style="background:#22c55e;color:#000;padding:6px 10px;border-radius:6px;text-decoration:none">Approve</a> <a href="/admin/reject?email={{email}}" style="background:#ef4444;color:#fff;padding:6px 10px;border-radius:6px;text-decoration:none">Reject</a></div></div>{% endfor %}<a href="/games" style="color:#8aa0c8">Back</a></body>"""
 
 @app.route("/")
-def home():
-    email = session.get("email")
-    free, pro, hist = update_cache()
-    is_admin = (email == ADMIN_EMAIL)
-    is_pro = False
-    if email and email in USERS:
-        if USERS[email].get("plan") == "pro":
-            is_pro = True
+def landing():
+    if "email" in session: return redirect("/games")
+    fetch_any_league()
+    return render_template_string(LANDING, date=get_wat().strftime("%Y-%m-%d"), cache=CACHE)
 
-    html = "<html><head>" + STYLE_HTML + "</head><body>"
-    html = html + "<div class=top><div style=font-weight:900;font-size:20px>MASTERPICK <span style=color:#00FF88>AI</span></div><div style=display:flex;gap:10px;align-items:center>"
-    if is_admin:
-        html = html + "<a href=/admin style=background:#4C6FFF;color:#fff;padding:8px 12px;border-radius:10px;text-decoration:none;font-size:10px;font-weight:800>Admin " + str(len(USERS)) + " | " + str(CACHE["calls"]) + "/100</a>"
-    if email:
-        html = html + "<a href=/logout style=color:#7A8AB0;text-decoration:none;font-size:12px>Logout</a>"
-    else:
-        html = html + "<a href=/login style=color:#fff;text-decoration:none;font-weight:700;font-size:13px>Login</a><a href=/signup style=background:#fff;color:#000;padding:9px 16px;border-radius:12px;text-decoration:none;font-weight:900;font-size:13px>Sign Up</a>"
-    html = html + "</div></div><div style=max-width:760px;margin:0 auto;padding:18px>"
+@app.route("/login", methods=["GET","POST"])
+def login():
+    msg=""
+    if request.method=="POST":
+        email=request.form.get("email","").lower().strip()
+        pwd=request.form.get("password","")
+        u=USERS.get(email)
+        if u and u["password"]==pwd:
+            session["email"]=email
+            return redirect("/games")
+        msg="Invalid credentials"
+    return render_template_string(LOGIN_HTML, msg=msg)
 
-    if not email:
-        live_count = CACHE["live"] if CACHE["live"] > 0 else len(CACHE["games"])
-        html = html + "<div style=padding:8px 4px 20px><div class=badge>● LIVE " + str(live_count) + " GAMES TODAY - WAT " + CACHE["fetched"] + "</div>"
-        html = html + "<div style=font-size:38px;font-weight:900;line-height:0.95;margin:18px 0;letter-spacing:-1.5px>AI Predicts Winners<br>With <span style=color:#00FF88>18 Parameters</span></div>"
-        html = html + "<div style=color:#8AA0C8;font-size:14px;line-height:1.6>Professional football intelligence. Real Nigeria WAT time. FT marked. Opay + Admin approval. Never runs out - Any country, any league.</div></div>"
-        html = html + "<div style=display:flex;gap:12px;margin:10px 0>"
-        html = html + "<div class=stat><div style=font-size:26px;font-weight:900;color:#00FF88>94%</div><div class=league>Win Rate</div></div>"
-        html = html + "<div class=stat><div style=font-size:26px;font-weight:900>" + str(len(CACHE["games"])) + "</div><div class=league>Games Today</div></div>"
-        html = html + "<div class=stat><div style=font-size:26px;font-weight:900>18</div><div class=league>Params</div></div>"
-        html = html + "</div>"
-        html = html + "<div class=card glow><div class=league style=color:#00FF88>" + str(CACHE["display"]) + " WAT | ANY COUNTRY | NEVER EMPTY | 18 PARAMS</div>"
-        html = html + "<div style=font-size:20px;font-weight:800;margin:10px 0>" + str(len(CACHE["games"])) + " Real Games Ready Now</div>"
-        html = html + "<a class=btn href=/signup>View Free Games - Create Account</a><a class=btn btn-dark href=/login>I Have Account - Login</a></div>"
-        html = html + "</div></body></html>"
-        return html
-
-    html = html + "<div class=card glow><div style=font-weight:900>" + str(CACHE["display"]) + " WAT - " + str(len(CACHE["games"])) + " Games</div><div class=league>Raw " + str(CACHE["raw"]) + " Live " + str(CACHE["live"]) + " Calls " + str(CACHE["calls"]) + "/100 | 18 Params | FT</div></div>"
-    for g in free:
-        if g["ft"] == "FT":
-            badge = "<span class=tag tag-ft>FT " + g["score"] + "</span>"
-        elif "LIVE" in g["status"]:
-            badge = "<span class=tag tag-live>" + g["status"] + "</span>"
+@app.route("/signup", methods=["GET","POST"])
+def signup():
+    msg=""
+    if request.method=="POST":
+        email=request.form.get("email","").lower().strip()
+        pwd=request.form.get("password","")
+        want_pro=bool(request.form.get("want_pro"))
+        if email in USERS: msg="Exists"
         else:
-            badge = "<span class=tag tag-live>" + str(g["wr"]) + "%</span>"
-        html = html + "<div class=card><div class=league>" + g["league"] + " | " + g["country"] + " | " + g["time"] + " " + badge + "</div><div class=match>" + g["match"] + " " + g["score"] + "</div><div style=display:flex;gap:10px;margin-top:10px><span class=tag>" + g["tip"] + "</span><span class=odd>" + g["odd"] + "</span></div></div>"
+            USERS[email]={"password":pwd, "is_pro":want_pro, "approved":False, "is_admin":False}
+            msg="Created! Login" + (" - Pro pending" if want_pro else "")
+    return render_template_string(SIGNUP_HTML, msg=msg)
 
-    if not is_pro:
-        html = html + "<div class=card><div style=font-weight:800>PRO " + str(len(pro)) + " Locked - Opay + Admin Approval</div><a class=btn style=background:#FFD84D href=/pay>Pay Opay " + OPAY_ACCOUNT + "</a></div>"
-    else:
-        for g in pro:
-            if g["ft"] == "FT":
-                badge = "<span class=tag tag-ft>FT " + g["score"] + "</span>"
-            elif "LIVE" in g["status"]:
-                badge = "<span class=tag tag-live>" + g["status"] + "</span>"
-            else:
-                badge = "<span class=tag tag-live>" + str(g["wr"]) + "%</span>"
-            html = html + "<div class=card><div class=league>" + g["league"] + " | " + g["time"] + " " + badge + "</div><div class=match>" + g["match"] + " " + g["score"] + "</div><div><span class=tag>" + g["tip"] + "</span><span class=odd>" + g["odd"] + "</span></div></div>"
+@app.route("/games")
+def games_page():
+    email=session.get("email")
+    if not email: return redirect("/login")
+    games=fetch_any_league()
+    user=USERS.get(email, {})
+    return render_template_string(GAMES_HTML, games=games, date=get_wat().strftime("%Y-%m-%d"), cache=CACHE, email=email, is_admin=user.get("is_admin", False), tok=TOKEN)
 
-    html = html + "</div></body></html>"
-    return html
-
-@app.route("/pay")
-def pay_page():
-    email = session.get("email")
-    if not email:
-        email = "guest"
-    msg = "Hi Admin I paid PRO " + email + " to Opay " + OPAY_ACCOUNT + " Please approve"
-    wa_url = wa_link(msg)
-    html = "<html><head>" + STYLE_HTML + "</head><body>"
-    html = html + "<div class=top><div style=font-weight:900>MASTERPICK <span style=color:#00FF88>AI</span></div><a href=/ style=color:#fff;text-decoration:none>Home</a></div>"
-    html = html + "<div style=max-width:520px;margin:0 auto;padding:20px><div class=card glow style=text-align:center><div style=font-size:22px;font-weight:900>Opay Payment - Admin Approval Required</div></div>"
-    html = html + "<div class=card style=text-align:center><div class=league>Opay Account</div><div style=font-size:36px;font-weight:900>" + OPAY_ACCOUNT + "</div><div class=league>" + email + "</div></div>"
-    html = html + "<div class=card><a class=btn href=" + wa_url + ">WhatsApp Proof to Admin</a><a class=btn btn-dark href=/>I Paid - Wait Approval</a></div></div></body></html>"
-    return html
+@app.route("/pro")
+def pro_page():
+    email=session.get("email")
+    if not email: return redirect("/login")
+    games=fetch_any_league()
+    return render_template_string(PRO_HTML, games=games, user=USERS.get(email, {}), email=email)
 
 @app.route("/admin")
-def admin_page():
-    email = session.get("email")
-    if email!= ADMIN_EMAIL:
-        return "Denied", 403
-    free, pro, hist = update_cache()
-    html = "<html><head>" + STYLE_HTML + "</head><body>"
-    html = html + "<div class=top><div>ADMIN V40 | " + str(CACHE["calls"]) + "/100 Raw " + str(CACHE["raw"]) + " Live " + str(CACHE["live"]) + "</div><a href=/ style=color:#fff;text-decoration:none>Home</a></div>"
-    html = html + "<div style=max-width:800px;margin:0 auto;padding:16px>"
-    for em, u in USERS.items():
-        html = html + "<div style=display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.06)><div><b>" + em + "</b> " + u.get("plan") + "</div>"
-        html = html + "<div><a href=/admin/approve?email=" + em + " style=background:#00FF88;color:#000;padding:8px 14px;border-radius:10px;text-decoration:none;font-weight:800;font-size:11px>Approve</a> "
-        html = html + "<a href=/admin/demote?email=" + em + " style=background:rgba(255,255,255,0.07);color:#ff5a65;padding:8px 12px;border-radius:10px;text-decoration:none;font-size:11px>Demote</a></div></div>"
-    html = html + "</div></body></html>"
-    return html
+def admin_panel():
+    email=session.get("email")
+    if not USERS.get(email, {}).get("is_admin"): return "Admin only: admin@masterpickai.com / Admin123!",403
+    return render_template_string(ADMIN_HTML, users=USERS, cache=CACHE)
 
 @app.route("/admin/approve")
-def approve_user():
-    if session.get("email")!= ADMIN_EMAIL:
-        return redirect("/")
-    target = request.args.get("email", "").lower().strip()
-    if target in USERS:
-        USERS[target]["plan"] = "pro"
+def approve():
+    if not USERS.get(session.get("email"), {}).get("is_admin"): return "Admin only",403
+    t=request.args.get("email","")
+    if t in USERS: USERS[t]["approved"]=True; USERS[t]["is_pro"]=True
     return redirect("/admin")
 
-@app.route("/admin/demote")
-def demote_user():
-    if session.get("email")!= ADMIN_EMAIL:
-        return redirect("/")
-    target = request.args.get("email", "").lower().strip()
-    if target in USERS and target!= ADMIN_EMAIL:
-        USERS[target]["plan"] = "free"
+@app.route("/admin/reject")
+def reject():
+    if not USERS.get(session.get("email"), {}).get("is_admin"): return "Admin only",403
+    t=request.args.get("email","")
+    if t in USERS: USERS[t]["approved"]=False; USERS[t]["is_pro"]=False
     return redirect("/admin")
-
-@app.route("/login", methods=["GET", "POST"])
-def login_page():
-    if request.method == "POST":
-        e = request.form.get("email", "").lower().strip()
-        p = request.form.get("pass", "")
-        if e in USERS and USERS[e]["pass"] == p:
-            session["email"] = e
-            return redirect("/")
-    html = "<html><head>" + STYLE_HTML + "</head><body>"
-    html = html + "<div class=top><div style=font-weight:900>MASTERPICK <span style=color:#00FF88>AI</span></div><a href=/ style=color:#fff;text-decoration:none>Home</a></div>"
-    html = html + "<div style=max-width:420px;margin:80px auto;padding:20px><div class=card glow><div style=font-size:22px;font-weight:900>Sign In - View Free Games</div>"
-    html = html + "<form method=post><input name=email placeholder=Email required style=width:100%;padding:14px;background:#0d1322;border:1px solid rgba(255,255,255,0.08);border-radius:12px;color:#fff;margin:8px 0>"
-    html = html + "<input name=pass type=password placeholder=Password required style=width:100%;padding:14px;background:#0d1322;border:1px solid rgba(255,255,255,0.08);border-radius:12px;color:#fff;margin:8px 0>"
-    html = html + "<button style=width:100%;background:#00FF88;color:#000;padding:14px;border-radius:12px;font-weight:900;border:none>Login</button></form></div></div></body></html>"
-    return html
-
-@app.route("/signup", methods=["GET", "POST"])
-def signup_page():
-    if request.method == "POST":
-        e = request.form.get("email", "").lower().strip()
-        p = request.form.get("pass", "")
-        if e not in USERS and e!= "":
-            USERS[e] = {"pass": p, "plan": "free", "joined": get_wat()[0]}
-            session["email"] = e
-            return redirect("/")
-    html = "<html><head>" + STYLE_HTML + "</head><body>"
-    html = html + "<div class=top><div style=font-weight:900>MASTERPICK <span style=color:#00FF88>AI</span></div><a href=/ style=color:#fff;text-decoration:none>Home</a></div>"
-    html = html + "<div style=max-width:420px;margin:80px auto;padding:20px><div class=card glow><div style=font-size:22px;font-weight:900>Create Free Account</div>"
-    html = html + "<form method=post><input name=email placeholder=Email required style=width:100%;padding:14px;background:#0d1322;border:1px solid rgba(255,255,255,0.08);border-radius:12px;color:#fff;margin:8px 0>"
-    html = html + "<input name=pass type=password placeholder=Password required style=width:100%;padding:14px;background:#0d1322;border:1px solid rgba(255,255,255,0.08);border-radius:12px;color:#fff;margin:8px 0>"
-    html = html + "<button style=width:100%;background:#00FF88;color:#000;padding:14px;border-radius:12px;font-weight:900;border:none>Create Account</button></form></div></div></body></html>"
-    return html
 
 @app.route("/logout")
-def logout_page():
-    session.clear()
-    return redirect("/")
+def logout():
+    session.pop("email",None); return redirect("/")
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+if __name__=="__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
