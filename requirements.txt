@@ -1,5 +1,1 @@
-fastapi
-uvicorn
-pytz
-apscheduler
-requests
+requests==2.31.0
